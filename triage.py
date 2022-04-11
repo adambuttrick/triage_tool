@@ -67,7 +67,6 @@ def check_existing_issues(org_name, ror_id=None):
         if mr > 95:
             print(org_name, 'was already requested or previously rejected. See issue#',
                   key, "at", value['html_url'])
-            sys.exit()
     if in_issues != []:
         return in_issues
     else:
@@ -189,6 +188,7 @@ def orcid_search(org_name):
 def ror_search(org_name):
     url = 'https://api.ror.org/organizations?affiliation="' + \
         urllib.parse.quote_plus(org_name) + '"'
+    print(url)
     api_response = requests.get(url).json()
     ror_matches = []
     if api_response['number_of_results'] != 0:
@@ -196,7 +196,11 @@ def ror_search(org_name):
         for result in results:
             ror_id = result['organization']['id']
             ror_name = result['organization']['name']
+            aliases = result['organization']['aliases']
             if org_name in ror_name:
+                match_type = 'name match'
+                ror_matches.append([ror_id, ror_name, match_type])
+            elif org_name in aliases:
                 match_type = 'name match'
                 ror_matches.append([ror_id, ror_name, match_type])
             elif 'relationships' in result['organization']:
