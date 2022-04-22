@@ -197,7 +197,8 @@ def ror_search(org_name):
             ror_id = result['organization']['id']
             ror_name = result['organization']['name']
             aliases = result['organization']['aliases']
-            if org_name in ror_name:
+            name_mr = fuzz.ratio(org_name, ror_name)
+            if name_mr >= 90:
                 match_type = 'name match'
                 ror_matches.append([ror_id, ror_name, match_type])
             elif org_name in aliases:
