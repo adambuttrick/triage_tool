@@ -185,34 +185,52 @@ def orcid_search(org_name):
         return []
 
 
+def clean_org_name(org_name):
+    org_name = org_name.lower()
+    return org_name
+
 def ror_search(org_name):
-    url = 'https://api.ror.org/organizations?affiliation="' + \
-        urllib.parse.quote_plus(org_name) + '"'
-    print(url)
-    api_response = requests.get(url).json()
+    query_url = 'https://api.ror.org/organizations?query="' + \
+       org_name + '"'
+    affiliation_url =  'https://api.ror.org/organizations?affiliation="' + \
+       org_name + '"'
+    all_urls = [query_url, affiliation_url]
     ror_matches = []
-    if api_response['number_of_results'] != 0:
-        results = api_response['items']
-        for result in results:
-            ror_id = result['organization']['id']
-            ror_name = result['organization']['name']
-            aliases = result['organization']['aliases']
-            name_mr = fuzz.ratio(org_name, ror_name)
-            if name_mr >= 90:
-                match_type = 'name match'
-                ror_matches.append([ror_id, ror_name, match_type])
-            elif org_name in aliases:
-                match_type = 'name match'
-                ror_matches.append([ror_id, ror_name, match_type])
-            elif 'relationships' in result['organization']:
-                for relationship in result['organization']['relationships']:
-                    if org_name in relationship['label']:
-                        match_type = 'relationship'
-                        ror_matches.append([ror_id, ror_name, match_type])
-        return ror_matches
+    for url in all_urls:
+        api_response = requests.get(url).json()
+        if api_response['number_of_results'] != 0:
+            results = api_response['items']
+            for result in results:
+                if 'organization' in result.keys():
+                    result = result['organization']
+                ror_id = result['id']
+                ror_name = result['name']
+                aliases = result['aliases']
+                labels = []
+                if result['labels'] != []:
+                    labels = [label['label'] for label in result['labels']]
+                name_mr = fuzz.ratio(clean_org_name(org_name), clean_org_name(ror_name))
+                if name_mr >= 90:
+                    match_type = 'name match'
+                    ror_matches.append([ror_id, ror_name, match_type])
+                elif org_name in aliases:
+                    match_type = 'alias match'
+                    ror_matches.append([ror_id, ror_name, match_type])
+                elif org_name in labels:
+                    match_type = 'label match'
+                    ror_matches.append([ror_id, ror_name, match_type])
+                elif 'relationships' in result:
+                    for relationship in result['relationships']:
+                        if org_name in relationship['label']:
+                            match_type = 'relationship'
+                            ror_matches.append([ror_id, ror_name, match_type])
+    ror_matches = list(ror_matches for ror_matches,_ in itertools.groupby(ror_matches))
+    if ror_matches == []:
+        print("No matches in ROR found for", org_name)
     else:
-        print('No matches found in ROR for', org_name)
-        return []
+        for match in ror_matches:
+            print("Found existing record in ROR", match[0], "-", match[1])
+    return ror_matches
 
 
 def get_wikidata(org_name, wikidata_id, match_ratio):
