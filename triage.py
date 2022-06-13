@@ -1,6 +1,7 @@
 import re
 import csv
 import sys
+import itertools
 import urllib.parse
 from os import getcwd
 from sys import argv
@@ -24,6 +25,12 @@ def get_issue_comments(comments_url):
         return ' '.join(comments_text)
     else:
         return ''
+
+def normalize_name(org_name):
+    org_name = org_name.lower()
+    org_name = re.sub(r'[^\w\s]', '', org_name)
+    return org_name
+
 
 def check_existing_issues(org_name, ror_id=None):
     print('Searching existing issues in Github...')
@@ -63,8 +70,8 @@ def check_existing_issues(org_name, ror_id=None):
                     except AttributeError:
                         print('Unable to check against issue#', issue_number, '- title cannot be parsed')
     for key, value in rejected_orgs.items():
-        mr = fuzz.ratio(org_name, value['title_name'])
-        if mr > 95:
+        mr = fuzz.ratio(normalize_name(org_name), normalize_name(value['title_name']))
+        if mr > 90:
             print(org_name, 'was already requested or previously rejected. See issue#',
                   key, "at", value['html_url'])
     if in_issues != []:
