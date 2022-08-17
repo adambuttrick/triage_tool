@@ -131,6 +131,19 @@ def get_location_entity(wikidata_id):
         return None
 
 
+def crossref_affiliation_search(org_name):
+    url = 'https://api.crossref.org/works?query.affiliation=' + \
+        urllib.parse.quote_plus(org_name)
+    api_response = requests.get(url).json()
+    if api_response['message']['items'] == []:
+        return None
+    else:
+        dois = []
+        for item in api_response['message']['items']:
+            doi = 'https://doi.org/' + item["DOI"]
+            dois.append(doi)
+    return '; '.join(dois[0:6])
+
 def funder_id_search(org_name):
     url = 'https://api.crossref.org/funders?query=' + \
         urllib.parse.quote_plus(org_name)
@@ -311,7 +324,7 @@ def get_wikidata(org_name, wikidata_id, match_ratio):
 def triage(name, ror_id=None):
     org_data = {}
     claims = ['wikidata_id', 'name', 'name_match_ratio', 'labels', 'established', 'city', 'city_geonames_id', 'admin_terr_name', 'admin_terr_geonames_id',
-              'country', 'wikipedia_url', 'links', 'lat_lng', 'grid_id', 'isni', 'crossref_funder_id', 'ringgold_id', 'google_scholar_affiliation_usage', 'orcid_affiliation_usage', 'issue_references']
+              'country', 'wikipedia_url', 'links', 'lat_lng', 'grid_id', 'isni', 'crossref_funder_id', 'ringgold_id', 'crossref_affiliations', 'google_scholar_affiliation_usage', 'orcid_affiliation_usage', 'issue_references']
     outfile = getcwd() + '/triage_result.txt'
     org_name = name
     search_results = search_wikidata(org_name)
@@ -322,6 +335,9 @@ def triage(name, ror_id=None):
     ror_matches = ror_search(org_name)
     if ror_matches != []:
         org_data['ror_matches'] = ror_matches
+    crossref_affiliations = crossref_affiliation_search(org_name)
+    if crossref_affiliations is not None:
+        org_data['crossref_affiliations'] = crossref_affiliations
     crossref_funder_id = funder_id_search(org_name)
     if crossref_funder_id is not None:
         org_data['crossref_funder_id'] = crossref_funder_id
