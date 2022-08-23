@@ -2,21 +2,34 @@ import re
 import csv
 import sys
 import itertools
+import string
 import urllib.parse
 from os import getcwd
 from sys import argv
 import requests
 from thefuzz import fuzz
 from scholarly import scholarly
+from unidecode import unidecode
 from scholarly import ProxyGenerator
 from bs4 import BeautifulSoup
 
-GITHUB= {}
+GITHUB = {}
 GITHUB['USER'] = ''
 GITHUB['TOKEN'] = ''
 
+
+def normalize_text(text):
+    text = text.lower()
+    text = unidecode(text)
+    text = re.sub(r'[^\w\s]', '', text)
+    exclude = set(string.punctuation)
+    text = ''.join(ch for ch in text if ch not in exclude)
+    return text
+
+
 def get_issue_comments(comments_url):
-    comments = requests.get(comments_url, auth=(GITHUB['USER'], GITHUB['TOKEN'])).json()
+    comments = requests.get(comments_url, auth=(
+        GITHUB['USER'], GITHUB['TOKEN'])).json()
     if comments != []:
         comments_text = []
         for comment in comments:
@@ -26,16 +39,11 @@ def get_issue_comments(comments_url):
     else:
         return ''
 
-def normalize_name(org_name):
-    org_name = org_name.lower()
-    org_name = re.sub(r'[^\w\s]', '', org_name)
-    return org_name
-
 
 def check_existing_issues(org_name, ror_id=None):
     print('Searching existing issues in Github...')
     rejected_orgs = {}
-    pages = [str(i) for i in range(1,10)]
+    pages = [str(i) for i in range(1, 10)]
     states = ['open', 'closed']
     in_issues = []
     base_url = 'https://api.github.com/repos/ror-community/ror-updates/issues?state='
@@ -50,7 +58,8 @@ def check_existing_issues(org_name, ror_id=None):
                 if ror_id:
                     issue_api_url = issue['url']
                     comments_url = issue_api_url + '/comments'
-                    issue_text = issue['body'] + get_issue_comments(comments_url)
+                    issue_text = issue['body'] + \
+                        get_issue_comments(comments_url)
                     if ror_id in issue_text:
                         in_issues.append(issue_html_url)
                 issue_number = issue['number']
@@ -64,13 +73,16 @@ def check_existing_issues(org_name, ror_id=None):
                 if 'new record' in label_data:
                     try:
                         pattern = re.compile(r'(?<=\:)(.*)($)')
-                        title_name = pattern.search(issue_title).group(0).strip()
+                        title_name = pattern.search(
+                            issue_title).group(0).strip()
                         rejected_orgs[issue_number] = {
                             'title_name': title_name, 'html_url': issue_html_url}
                     except AttributeError:
-                        print('Unable to check against issue#', issue_number, '- title cannot be parsed')
+                        print('Unable to check against issue#',
+                              issue_number, '- title cannot be parsed')
     for key, value in rejected_orgs.items():
-        mr = fuzz.ratio(normalize_name(org_name), normalize_name(value['title_name']))
+        mr = fuzz.ratio(normalize_text(org_name),
+                        normalize_text(value['title_name']))
         if mr > 90:
             print(org_name, 'was already requested or previously rejected. See issue#',
                   key, "at", value['html_url'])
@@ -139,10 +151,16 @@ def crossref_affiliation_search(org_name):
         return None
     else:
         dois = []
-        for item in api_response['message']['items']:
-            doi = 'https://doi.org/' + item["DOI"]
-            dois.append(doi)
+        works = api_response['message']['items']
+        for work in works:
+            for author in work['author']:
+                for affiliation in author['affiliation']:
+                    if normalize_text(org_name) in normalize_text(affiliation['name']):
+                        doi = 'https://doi.org/' + work["DOI"]
+                        dois.append(doi)
+    dois = list(set(dois))
     return '; '.join(dois[0:6])
+
 
 def funder_id_search(org_name):
     url = 'https://api.crossref.org/funders?query=' + \
@@ -205,15 +223,11 @@ def orcid_search(org_name):
         return []
 
 
-def clean_org_name(org_name):
-    org_name = org_name.lower()
-    return org_name
-
 def ror_search(org_name):
     query_url = 'https://api.ror.org/organizations?query="' + \
-       org_name + '"'
-    affiliation_url =  'https://api.ror.org/organizations?affiliation="' + \
-       org_name + '"'
+        org_name + '"'
+    affiliation_url = 'https://api.ror.org/organizations?affiliation="' + \
+        org_name + '"'
     all_urls = [query_url, affiliation_url]
     ror_matches = []
     for url in all_urls:
@@ -229,7 +243,8 @@ def ror_search(org_name):
                 labels = []
                 if result['labels'] != []:
                     labels = [label['label'] for label in result['labels']]
-                name_mr = fuzz.ratio(clean_org_name(org_name), clean_org_name(ror_name))
+                name_mr = fuzz.ratio(normalize_text(
+                    org_name), normalize_text(ror_name))
                 if name_mr >= 90:
                     match_type = 'name match'
                     ror_matches.append([ror_id, ror_name, match_type])
@@ -244,7 +259,8 @@ def ror_search(org_name):
                         if org_name in relationship['label']:
                             match_type = 'relationship'
                             ror_matches.append([ror_id, ror_name, match_type])
-    ror_matches = list(ror_matches for ror_matches,_ in itertools.groupby(ror_matches))
+    ror_matches = list(ror_matches for ror_matches,
+                       _ in itertools.groupby(ror_matches))
     if ror_matches == []:
         print("No matches in ROR found for", org_name)
     else:
@@ -357,7 +373,7 @@ def triage(name, ror_id=None):
         issue_refs = check_existing_issues(org_name, ror_id)
         if issue_refs:
             org_data['issue_references'] = ' ; '.join(
-            issue_refs)
+                issue_refs)
     else:
         issue_refs = check_existing_issues(org_name)
         org_data['issue_references'] = None
@@ -378,6 +394,6 @@ def triage(name, ror_id=None):
 
 if __name__ == '__main__':
     if len(argv) >= 3:
-        triage(argv[1],argv[2])
+        triage(argv[1], argv[2])
     else:
         triage(argv[1])
