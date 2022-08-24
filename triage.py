@@ -18,15 +18,6 @@ GITHUB['USER'] = ''
 GITHUB['TOKEN'] = ''
 
 
-def normalize_text(text):
-    text = text.lower()
-    text = unidecode(text)
-    text = re.sub(r'[^\w\s]', '', text)
-    exclude = set(string.punctuation)
-    text = ''.join(ch for ch in text if ch not in exclude)
-    return text
-
-
 def get_issue_comments(comments_url):
     comments = requests.get(comments_url, auth=(
         GITHUB['USER'], GITHUB['TOKEN'])).json()
@@ -40,10 +31,19 @@ def get_issue_comments(comments_url):
         return ''
 
 
+def normalize_text(text):
+    text = text.lower()
+    text = unidecode(text)
+    text = re.sub(r'[^\w\s]', '', text)
+    exclude = set(string.punctuation)
+    text = ''.join(ch for ch in text if ch not in exclude)
+    return text
+
+
 def check_existing_issues(org_name, ror_id=None):
     print('Searching existing issues in Github...')
     rejected_orgs = {}
-    pages = [str(i) for i in range(1, 10)]
+    pages = [str(i) for i in range(1, 20)]
     states = ['open', 'closed']
     in_issues = []
     base_url = 'https://api.github.com/repos/ror-community/ror-updates/issues?state='
@@ -84,7 +84,10 @@ def check_existing_issues(org_name, ror_id=None):
         mr = fuzz.ratio(normalize_text(org_name),
                         normalize_text(value['title_name']))
         if mr > 90:
-            print(org_name, 'was already requested or previously rejected. See issue#',
+            print(org_name, 'was requested in issue#',
+                  key, "at", value['html_url'])
+        elif normalize_text(org_name) in normalize_text(value['title_name']):
+            print(org_name, 'was requested in issue#',
                   key, "at", value['html_url'])
     if in_issues != []:
         return in_issues
@@ -143,6 +146,27 @@ def get_location_entity(wikidata_id):
         return None
 
 
+def isni_search(org_name):
+    query_url = 'https://isni.ringgold.com/api/stable/search?q="' + \
+        normalize_text(org_name) + '"'
+    print(query_url)
+    r = requests.get(query_url)
+    api_response = r.json()
+    institutions = api_response['institutions']
+    if institutions != []:
+        for institution in institutions:
+            isni_id = institution['isni']
+            isni_names = [institution['name']] + institution['alt_names']
+            for isni_name in isni_names:
+                match_ratio = fuzz.ratio(normalize_text(
+                    name), normalize_text(isni_name))
+                if match_ratio > 90:
+                    print('ISNI found - {org_name} matched {isni_name}'.format(
+                        org_name=org_name, isni_name=isni_name))
+                    return isni_id
+    return None
+
+
 def crossref_affiliation_search(org_name):
     url = 'https://api.crossref.org/works?query.affiliation=' + \
         urllib.parse.quote_plus(org_name)
@@ -153,11 +177,12 @@ def crossref_affiliation_search(org_name):
         dois = []
         works = api_response['message']['items']
         for work in works:
-            for author in work['author']:
-                for affiliation in author['affiliation']:
-                    if normalize_text(org_name) in normalize_text(affiliation['name']):
-                        doi = 'https://doi.org/' + work["DOI"]
-                        dois.append(doi)
+            if 'author' in work.keys():
+                for author in work['author']:
+                    for affiliation in author['affiliation']:
+                        if normalize_text(org_name) in normalize_text(affiliation['name']):
+                            doi = 'https://doi.org/' + work["DOI"]
+                            dois.append(doi)
     dois = list(set(dois))
     return '; '.join(dois[0:6])
 
@@ -327,7 +352,7 @@ def get_wikidata(org_name, wikidata_id, match_ratio):
             wikidata_entry['grid_id'] = grid_id
         if 'P213' in claims:
             isni = claims['P213'][0]['mainsnak']['datavalue']['value']
-            wikidata_entry['isni'] = isni
+            wikidata_entry['wikidata_isni_id'] = isni
         if 'P3500' in claims:
             ringgold_id = claims['P3500'][0]['mainsnak']['datavalue']['value']
             wikidata_entry['ringgold_id'] = ringgold_id
@@ -340,7 +365,7 @@ def get_wikidata(org_name, wikidata_id, match_ratio):
 def triage(name, ror_id=None):
     org_data = {}
     claims = ['wikidata_id', 'name', 'name_match_ratio', 'labels', 'established', 'city', 'city_geonames_id', 'admin_terr_name', 'admin_terr_geonames_id',
-              'country', 'wikipedia_url', 'links', 'lat_lng', 'grid_id', 'isni', 'crossref_funder_id', 'ringgold_id', 'crossref_affiliations', 'google_scholar_affiliation_usage', 'orcid_affiliation_usage', 'issue_references']
+              'country', 'wikipedia_url', 'links', 'lat_lng', 'grid_id', 'wikidata_isni_id', 'isni_id', 'crossref_funder_id', 'ringgold_id', 'crossref_affiliations', 'google_scholar_affiliation_usage', 'orcid_affiliation_usage', 'issue_references']
     outfile = getcwd() + '/triage_result.txt'
     org_name = name
     search_results = search_wikidata(org_name)
@@ -351,6 +376,9 @@ def triage(name, ror_id=None):
     ror_matches = ror_search(org_name)
     if ror_matches != []:
         org_data['ror_matches'] = ror_matches
+    isni_id = isni_search(org_name)
+    if isni_id is not None:
+        org_data['isni_id'] = isni_id
     crossref_affiliations = crossref_affiliation_search(org_name)
     if crossref_affiliations is not None:
         org_data['crossref_affiliations'] = crossref_affiliations
@@ -362,13 +390,13 @@ def triage(name, ror_id=None):
         org_data['google_scholar_affiliation_usage'] = '; '.join(
             google_scholar_affiliations)
     else:
-        print('No google scholar affiliations found')
+        print('No Google Scholar affiliations found')
     orcid_affiliations = orcid_search(org_name)
     if orcid_affiliations != []:
         org_data['orcid_affiliation_usage'] = ' ; '.join(
             orcid_affiliations)
     else:
-        print('No orcid affiliations found')
+        print('No ORCID affiliations found')
     if ror_id:
         issue_refs = check_existing_issues(org_name, ror_id)
         if issue_refs:
